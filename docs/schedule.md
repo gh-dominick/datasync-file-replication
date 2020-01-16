@@ -2,6 +2,18 @@
 
 ### DataSync Components -- Task Scheduling
 
+Recently release! You can schedule when the task runs within the task options.
 
+* Schedule expressions be in **cron** or **rate**.
 
-[Next](/docs/filtering.md)
+```bash
+ScheduleExpression="cron(00 * * * ? *)"
+```
+
+```bash
+ScheduleExpression="rate(60 minutes)"
+```
+
+![Scheduling](/docs/images/task-schedule.png)
+
+[Next: Task Filtering](/docs/filtering.md)
