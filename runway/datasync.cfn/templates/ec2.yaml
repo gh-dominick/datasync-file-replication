@@ -1,0 +1,122 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: EC2 Instance
+Parameters:
+  CustomerName:
+    Type: String
+  ApplicationName:
+    Type: String
+    Default: datasync
+  EnvironmentName:
+    Type: String
+    Description: Environment name
+  SshKey:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: SSH Key pair
+  AmiId:
+    Type: String
+    Description: AMI ID
+  InstanceType:
+    Type: String
+    Description: EC2 instance size
+    Default: t3.nano
+  SubnetId:
+    Type: String
+    Description: Availability zone subnet ID
+  DefaultSecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group ID to be assigned to the instance
+  EfsClientSecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group ID to be assigned to the instance
+  EfsFilesystemId:
+    Description: EFS file system ID
+    Type: String
+Resources:
+  IamInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM'
+      Path: /
+      Policies:
+        - PolicyName: datasync-all
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: datasync:*
+                Resource: '*'
+        - PolicyName: ec2-all
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: ec2:*
+                Resource: '*'
+        - PolicyName: efs-read
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: elasticfilesystem:Describe*
+                Resource: '*'
+  IamInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref IamInstanceRole
+  Ec2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref Ec2LaunchTemplate
+        Version: 1
+  Ec2LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        IamInstanceProfile:
+          Name: !Ref IamInstanceProfile
+        ImageId: !Ref AmiId
+        InstanceType: !Ref InstanceType
+        KeyName: !Ref SshKey
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            Groups:
+              - !Ref DefaultSecurityGroup
+              - !Ref EfsClientSecurityGroup
+            SubnetId: !Ref SubnetId
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              -
+                Key: Name
+                Value: !Sub ${CustomerName}-${EnvironmentName}-${ApplicationName}-ec2-instance
+        UserData:
+          Fn::Base64:
+            !Sub |
+              #cloud-config
+              repo_update: true
+              repo_upgrade: all
+
+              packages:
+              - python34
+
+              runcmd:
+              - curl -O https://bootstrap.pypa.io/get-pip.py
+              - python3 get-pip.py --user
+              - export PATH=~/.local/bin:$PATH
+              - pip3 install awscli --upgrade --user
+              - mkdir -p /efs
+              - mount -t efs ${EfsFilesystemId}:/ /efs

@@ -1,0 +1,366 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: AutoScaling Application Server(s) - 1.0.0
+Parameters:
+  ApplicationName:
+    Type: String
+    Description: Name of the application
+  CustomerName:
+    Type: String
+    Description: Name of customer
+  EnvironmentName:
+    Type: String
+    Description: Environment name
+  SshKey:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: SSH Key pair to auth withcommandId=$(aws ssm send-command --max-concurrency 1 --max-errors 0 --targets Key=tag:aws:ec2:fleet-id,Values=fleet-e26bd5c6-1c8c-4f2c-ba26-968afb52cc75 --document-name "AWS-RunShellScript" --parameters commands="sudo cat /tmp/datasync_task_execution.log" --query 'Command.CommandId' --output text --region us-east-1); instanceId=$(aws ec2 describe-fleet-instances --fleet-id fleet-e26bd5c6-1c8c-4f2c-ba26-968afb52cc75 --query 'ActiveInstances[0].InstanceId' --output text --region us-east-1); aws ssm get-command-invocation --command-id ${commandId} --instance-id ${instanceId} --query 'StandardOutputContent' --output text --region us-east-1
+  AgentSecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group ID to be assigned to the instances within the ASG
+  AllServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group ID to be assigned to the instances within the ASG
+  EfsClientSecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group ID to be assigned to the instances within the ASG
+  InstanceType:
+    Type: String
+    Description: Agent instance size
+    Default: m5.2xlarge
+    AllowedValues:
+      - m5.10xlarge
+      - m5.2xlarge
+      - m5.4xlarge
+  SyncTaskCronSchedule:
+    Type: String
+    Default: '05 * * * ? *'
+    Description: Task cron schedule (cron format in UTC - [minute hour day/of/month month day/of/week year]
+  DestinationEfsIp:
+    Description: Destination EFS filesystem IP.
+    Type: String
+  DestinationSubdirectory:
+    Description: Destination EFS subdirectory.
+    Type: String
+    Default: "/"
+  SourceLocationRegion:
+    Description: Source AWS region.
+    Type: String
+    AllowedValues:
+    - us-east-1
+    - us-east-2
+    - us-west-1
+    - us-west-2
+    - eu-west-1
+    - eu-central-1
+    - ap-northeast-1
+    - ap-northeast-2
+    - ap-southeast-1
+    - ap-southeast-2
+  SourceEfsFilesystemId:
+    Description: EFS file system ID
+    Type: String
+  SourceSubdirectory:
+    Default: "/"
+    Description: The directory of the source NFS file system
+    Type: String
+  SourceSubnetId:
+    AllowedPattern: ^(subnet-)(?=[a-z0-9]*?)(?:.{8}|.{17})$
+    Description: Source EFS subnet id
+    Type: String
+  VpcEndpoint:
+    Type: String
+    Description: Datasync VPC Endpoint for PrivateLink
+    Default: ''
+  VpcEndpointSecurityGroupId:
+    Type: String
+    Description: VPC Endpoint Security Group ID
+    Default: ''
+  PrivateLinkEndpointIp:
+    Type: String
+    Description: VPC Endpoint private link IP address
+    Default: ''
+Mappings:
+  AmiRegion:
+    ap-northeast-1:
+      ami: ami-083d930199b517fc8
+    ap-northeast-2:
+      ami: ami-03d858a112a65b4b0
+    ap-southeast-1:
+      ami: ami-0bc229d430d9cd6b6
+    ap-southeast-2:
+      ami: ami-0786ddae86abf0362
+    ca-central-1:
+      ami: ami-0a17712db83f3f852
+    eu-central-1:
+      ami: ami-0b433b5eddaddf1bb
+    eu-west-1:
+      ami: ami-031e8db602e4ed16f
+    eu-west-2:
+      ami: ami-0036f42661dd3512d
+    eu-west-3:
+      ami: ami-00a50aa3d89a1d6c1
+    me-south-1:
+      ami: ami-0c563edbfd36aef7f
+    us-east-1:
+      ami: ami-08060db92d824f291
+    us-east-2:
+      ami: ami-0b350e66c3b082eac
+    us-west-1:
+      ami: ami-05d76395fd50e3d80
+    us-west-2:
+      ami: ami-01a8854868b5df8da
+Resources:
+  AgentFleet:
+    Type: AWS::EC2::EC2Fleet
+    Properties:
+      ExcessCapacityTerminationPolicy: termination
+      LaunchTemplateConfigs:
+        - LaunchTemplateSpecification:
+            LaunchTemplateId: !Ref LaunchTemplate
+            Version: 1
+      ReplaceUnhealthyInstances: true
+      TargetCapacitySpecification:
+        DefaultTargetCapacityType: spot
+        TotalTargetCapacity: 1
+      Type: maintain
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref InstanceRole
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM'
+      Path: /
+      Policies:
+        - PolicyName: datasync-all
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: datasync:*
+                Resource: '*'
+        - PolicyName: ec2-all
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: ec2:*
+                Resource: '*'
+        - PolicyName: efs-read
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: elasticfilesystem:Describe*
+                Resource: '*'
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Join [ '', [ 'DataSync-Agent-', !Ref 'AWS::StackName' ] ]
+      LaunchTemplateData:
+        IamInstanceProfile:
+          Name: !Ref InstanceProfile
+        ImageId: !FindInMap [AmiRegion, !Ref "AWS::Region", ami]
+        InstanceType: !Ref InstanceType
+        KeyName: !Ref SshKey
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            Groups:
+              - !Ref AgentSecurityGroup
+              - !Ref AllServerSecurityGroup
+              - !Ref EfsClientSecurityGroup
+            SubnetId: !Ref SourceSubnetId
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              -
+                Key: Name
+                Value: !Sub ${CustomerName}-${EnvironmentName}-${ApplicationName}
+              -
+                Key: StackName
+                Value: !Ref 'AWS::StackName'
+        UserData:
+          Fn::Base64:
+            !Sub |
+              #cloud-config
+              repo_update: true
+              repo_upgrade: all
+
+              write_files:
+              - content: |
+                  #!/bin/bash
+
+                  function getActivationKey
+                  {
+                      curl --silent "localhost:8080/?activationRegion=${AWS::Region}&gatewayType=SYNC&endpointType=PRIVATE_LINK&privateLinkEndpoint=${PrivateLinkEndpointIp}&no_redirect"
+                  }
+
+                  function createAgent
+                  {
+                      local activationKey=$1
+                      aws datasync create-agent --activation-key ${!activationKey} --agent-name datasync-agent --vpc-endpoint-id ${VpcEndpoint} --subnet-arns arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet/${SourceSubnetId} --security-group-arns arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/${EfsClientSecurityGroup} --region ${AWS::Region} --tags Key=StackName,Value=${AWS::StackName} --output text
+                  }
+
+                  function createSourceDataSyncLocationEfs
+                  {
+                      aws datasync create-location-efs --efs-filesystem-arn 'arn:aws:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:file-system/${SourceEfsFilesystemId}' --subdirectory ${SourceSubdirectory} --ec2-config SubnetArn='arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet/${SourceSubnetId}',SecurityGroupArns='arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/${EfsClientSecurityGroup},arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/${AgentSecurityGroup}' --region ${AWS::Region} --tags Key=StackName,Value=${AWS::StackName} --output text
+                  }
+
+                  function createDataSyncLocationEfs
+                  {
+                      local agentArns=$1
+                      aws datasync create-location-nfs --server-hostname ${DestinationEfsIp} --subdirectory ${DestinationSubdirectory} --on-prem-config AgentArns=${!agentArns} --region ${AWS::Region} --tags Key=StackName,Value=${AWS::StackName} --output text
+                  }
+
+                  function createDataSyncTask
+                  {
+                      local sourceLocationArn=$1
+                      local destinationLocationArn=$2
+                      aws datasync create-task --source-location-arn ${!sourceLocationArn} --destination-location-arn ${!destinationLocationArn} --schedule ScheduleExpression="cron(${SyncTaskCronSchedule})" --options VerifyMode=NONE,OverwriteMode=ALWAYS,Atime=BEST_EFFORT,Mtime=PRESERVE,PreserveDeletedFiles=REMOVE,PreserveDevices=PRESERVE,PosixPermissions=PRESERVE,TaskQueueing=ENABLED --name Stack:${AWS::StackName} --region ${AWS::Region} --tags Key=StackName,Value=${AWS::StackName} --output text
+                  }
+
+                  function startDataSyncTaskExecution
+                  {
+                      local taskArn=$1
+                      aws datasync start-task-execution --task-arn ${!taskArn} --region ${AWS::Region} --output text
+                  }
+                path: /tmp/functions_datasync.sh
+                permissions: 0777
+
+              - content: |
+                  #!/bin/bash
+
+                  source /tmp/functions_datasync.sh
+                  echo -e "$(date -u +%FT%T.%3N)\tDataSync":" Execute\tRunning task execution function startDataSyncTaskExecution()" >> /tmp/datasync_task_execution.log 2>&1
+                  if [ "$?" != "0" ]
+                  then
+                      echo -e "$(date -u +%FT%T.%3N)\tDataSync: Error\t\tFailed to run task execution function" >> /tmp/datasync_task_execution.log 2>&1
+                      exit 1
+                  fi
+                  echo -e "$(date -u +%FT%T.%3N)\tDataSync: Success\tTask executed ${!executionId}" >> /tmp/datasync_task_execution.log 2>&1
+                path: /tmp/start_datasync_task_execution.sh
+                permissions: 0777
+
+              - content: |
+                  #!/bin/bash
+
+                  # source datasync functions
+                  source /tmp/functions_datasync.sh
+                  # start create delete datasync resources script
+                  echo -e "aws cloudformation delete-stack --stack-name ${AWS::StackName} --region ${AWS::Region}" >> /tmp/delete_datasync_resources.sh
+
+                  # get activation key
+                  echo -e "$(date -u +%FT%T.%3N)\tDataSync: Execute\tSelf-activating and generating activation key on agent on ${!agentIp}" >> /tmp/datasync_setup.log 2>&1
+                  activationKey=$(getActivationKey)
+                  if [ "$?" != "0" ]
+                  then
+                     echo -e "$(date -u +%FT%T.%3N)\tDataSync: Error\t\tFailed to self-activate or generate activation key on ${!agentIp}" >> /tmp/datasync_setup.log 2>&1
+                     exit 1
+                  fi
+                  echo -e "$(date -u +%FT%T.%3N)\tDataSync: Success\tKey generated: ${!activationKey}" >> /tmp/datasync_setup.log 2>&1
+
+                  # activate agent
+                  echo -e "$(date -u +%FT%T.%3N)\tDataSync: Execute\tCreating agent in ${AWS::Region} for ${!agentIp} using activation key ${!activationKey}" >> /tmp/datasync_setup.log 2>&1
+                  agentArns=$(createAgent ${!activationKey})
+                  if [ "$?" != "0" ]
+                  then
+                      echo -e "$(date -u +%FT%T.%3N)\tDataSync: Error\t\tFailed to create agent in ${AWS::Region} for ${!agentIp} using activation key ${!activationKey}" >> /tmp/datasync_setup.log 2>&1
+                      exit 1
+                  fi
+                  echo -e "$(date -u +%FT%T.%3N)\tDataSync: Success\tAgent created: ${!agentArns}" >> /tmp/datasync_setup.log 2>&1
+                  sed -i "1iaws datasync delete-agent --agent-arn ${!agentArns} --region ${AWS::Region}" /tmp/delete_datasync_resources.sh
+
+                  # source datasync functions
+                  source /tmp/functions_datasync.sh
+
+                  # start create delete datasync resources script
+                  echo -e "aws cloudformation delete-stack --stack-name ${AWS::StackName} --region ${AWS::Region}" >> /tmp/delete_datasync_resources.sh
+                  # create source location (efs)
+                  echo -e "$(date -u +%FT%T.%3N)\tDataSync: Execute\tCreating source location(efs) for ${SourceEfsFilesystemId}" >> /tmp/datasync_setup.log 2>&1
+                  sourceLocationArn=$(createSourceDataSyncLocationEfs)
+                  if [ "$?" != "0" ]
+                  then
+                      echo -e "$(date -u +%FT%T.%3N)\tDataSync: Error\t\tFailed to create source location for ${SourceEfsFilesystemId}" >> /tmp/datasync_setup.log 2>&1
+                      exit 1
+                  fi
+                  echo -e "$(date -u +%FT%T.%3N)\tDataSync: Success\tSource location(efs) created: ${!sourceLocationArn}" >> /tmp/datasync_setup.log 2>&1
+                  sed -i "1iaws datasync delete-location --location-arn ${!sourceLocationArn} --region ${AWS::Region}" /tmp/delete_datasync_resources.sh
+
+                  # create destination location (efs)
+                  echo -e "$(date -u +%FT%T.%3N)\tDataSync: Execute\tCreating destination location(efs) for ${DestinationEfsIp}" >> /tmp/datasync_setup.log 2>&1
+                  destinationLocationArn=$(createDataSyncLocationEfs ${!agentArns})
+                  if [ "$?" != "0" ]
+                  then
+                      echo -e "$(date -u +%FT%T.%3N)\tDataSync: Error\t\tFailed to create destination location for ${DestinationEfsIp}" >> /tmp/datasync_setup.log 2>&1
+                      exit 1
+                  fi
+                  echo -e "$(date -u +%FT%T.%3N)\tDataSync: Success\tDestination location(efs) created: ${!destinationLocationArn}" >> /tmp/datasync_setup.log 2>&1
+                  sed -i "1iaws datasync delete-location --location-arn ${!destinationLocationArn} --region ${AWS::Region}" /tmp/delete_datasync_resources.sh
+
+                  # create task
+                  echo -e "$(date -u +%FT%T.%3N)\tDataSync: Execute\tCreating task between ${SourceEfsFilesystemId}${SourceSubdirectory} and ${DestinationEfsIp}${DestinationSubdirectory}" >> /tmp/datasync_setup.log 2>&1
+                  taskArn=$(createDataSyncTask ${!sourceLocationArn} ${!destinationLocationArn})
+                  if [ "$?" != "0" ]
+                  then
+                      echo -e "$(date -u +%FT%T.%3N)\tDataSync: Error\t\tFailed to create task between ${SourceEfsFilesystemId}${SourceSubdirectory} and ${DestinationEfsIp}${DestinationSubdirectory}" >> /tmp/datasync_setup.log 2>&1
+                      exit 1
+                  fi
+                  echo -e "$(date -u +%FT%T.%3N)\tDataSync: Success\tTask created: ${!taskArn}" >> /tmp/datasync_setup.log 2>&1
+                  sed -i "1iaws datasync delete-task --task-arn ${!taskArn} --region ${AWS::Region}" /tmp/delete_datasync_resources.sh
+
+                  # update datasync task execution script with task arn
+                  echo -e "$(date -u +%FT%T.%3N)\tDataSync: Execute\tUpdating /tmp/start_datasync_task_execution.sh with task arn" >> /tmp/datasync_setup.log 2>&1
+                  sed -i -e "5i executionId=\$\(startDataSyncTaskExecution ${!taskArn} ${AWS::Region}\)" /tmp/start_datasync_task_execution.sh
+                  if [ "$?" != "0" ]
+                  then
+                      echo -e "$(date -u +%FT%T.%3N)\tDataSync: Error\t\tFailed to update /tmp/start_datasync_task_execution.sh" >> /tmp/datasync_setup.log 2>&1
+                      exit 1
+                  fi
+                  echo -e "$(date -u +%FT%T.%3N)\tDataSync: Success\tDatasync task execution script /tmp/start_datasync_task_execution.sh updated with task arn" >> /tmp/datasync_setup.log 2>&1
+
+                path: /tmp/create_datasync_resources.sh
+                permissions: 0777
+
+              packages:
+              - python34
+
+              runcmd:
+              - curl -O https://bootstrap.pypa.io/get-pip.py
+              - python3 get-pip.py --user
+              - export PATH=~/.local/bin:$PATH
+              - pip3 install awscli --upgrade --user
+              - source /tmp/functions_datasync.sh
+              - agentIp=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+              - sleep 60
+              - echo /tmp/create_datasync_resources.sh
+              - echo -e "$(date -u +%FT%T.%3N)\tDataSync":" Execute\tCreating datasync resources" >> /tmp/datasync_setup.log 2>&1
+              - /tmp/create_datasync_resources.sh
+              - if [ "$?" != "0" ]; then echo -e "$(date -u +%FT%T.%3N)\tDataSync":" Error\t\tFailed to create datasync resources" >> /tmp/datasync_setup.log 2>&1; else echo -e "$(date -u +%FT%T.%3N)\tDataSync":" Success\tCreated datasync resources" >> /tmp/datasync_setup.log 2>&1; fi
+Outputs:
+  ViewDataSyncSetupLog:
+    Description: SSM command to view DataSync setup log
+    Value:
+      !Sub |
+        commandId=$(aws ssm send-command --max-concurrency 1 --max-errors 0 --targets Key=tag:aws:ec2:fleet-id,Values=${AgentFleet} --document-name "AWS-RunShellScript" --parameters commands="sudo cat /tmp/datasync_setup.log" --query 'Command.CommandId' --output text --region ${AWS::Region}); instanceId=$(aws ec2 describe-fleet-instances --fleet-id ${AgentFleet} --query 'ActiveInstances[0].InstanceId' --output text --region ${AWS::Region}); aws ssm get-command-invocation --command-id ${!commandId} --instance-id ${!instanceId} --query 'StandardOutputContent' --output text --region ${AWS::Region}
+  ViewDataSyncTaskExecutionLog:
+    Description: SSM command to view DataSync task execution log
+    Value:
+      !Sub |
+        commandId=$(aws ssm send-command --max-concurrency 1 --max-errors 0 --targets Key=tag:aws:ec2:fleet-id,Values=${AgentFleet} --document-name "AWS-RunShellScript" --parameters commands="sudo cat /tmp/datasync_task_execution.log" --query 'Command.CommandId' --output text --region ${AWS::Region}); instanceId=$(aws ec2 describe-fleet-instances --fleet-id ${AgentFleet} --query 'ActiveInstances[0].InstanceId' --output text --region ${AWS::Region}); aws ssm get-command-invocation --command-id ${!commandId} --instance-id ${!instanceId} --query 'StandardOutputContent' --output text --region ${AWS::Region}
+  ViewDeleteDataSyncResourcesScript:
+    Description: SSM command to view delete DataSync resources script
+    Value:
+      !Sub |
+        commandId=$(aws ssm send-command --max-concurrency 1 --max-errors 0 --targets Key=tag:aws:ec2:fleet-id,Values=${AgentFleet} --document-name "AWS-RunShellScript" --parameters commands="sudo cat /tmp/delete_datasync_resources.sh" --query 'Command.CommandId' --output text --region ${AWS::Region}); instanceId=$(aws ec2 describe-fleet-instances --fleet-id ${AgentFleet} --query 'ActiveInstances[0].InstanceId' --output text --region ${AWS::Region}); aws ssm get-command-invocation --command-id ${!commandId} --instance-id ${!instanceId} --query 'StandardOutputContent' --output text --region ${AWS::Region}

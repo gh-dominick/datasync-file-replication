@@ -1,0 +1,46 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Create Security Group - 1.0.0
+Parameters:
+  ApplicationName:
+    Description: Descriptive app name
+    Type: String
+  CustomerName:
+    AllowedPattern: '[-_ a-z]*'
+    Default: ''
+    Description: >-
+      The name for the customer. Must be all lowercase letters, should not
+      contain spaces or special characters, nor should it include any part of
+      EnvironmentName.
+    Type: String
+  EnvironmentName:
+    Default: common
+    Description: Name of Environment
+    Type: String
+  VpcId:
+    Description: VPC id.
+    Type: 'AWS::EC2::VPC::Id'
+Resources:
+  SecurityGroup:
+    Properties:
+      GroupDescription: !Join
+        - '-'
+        - - !Ref CustomerName
+          - !Ref EnvironmentName
+          - !Ref ApplicationName
+          - sg
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref CustomerName
+              - !Ref EnvironmentName
+              - !Ref ApplicationName
+              - sg
+      VpcId: !Ref VpcId
+    Type: 'AWS::EC2::SecurityGroup'
+Outputs:
+  SecurityGroup:
+    Description: Security group
+    Export:
+      Name: !Sub '${AWS::StackName}-SecurityGroup'
+    Value: !Ref SecurityGroup

@@ -1,0 +1,10 @@
+---
+deployments:
+  - modules:
+      #- datasync.tf
+      - datasync.cfn
+    regions:
+      - us-east-1
+    # module_options:
+    #   terraform_version:
+    #     "*": 0.12.16  # applies to all environments

@@ -1,0 +1,97 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: EFS
+Parameters:
+  CustomerName:
+    Type: String
+  ApplicationName:
+    Type: String
+    Default: 'production'
+  EfsEncrypted:
+    Type: String
+    Default: false
+    AllowedValues:
+      - true
+      - false
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  Subnet1:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public or private subnet ID
+  Subnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public or private subnet ID
+Resources:
+  EfsClientSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Sub ${VpcId}
+      GroupDescription: Client security group for EFS mount
+      GroupName: !Sub ${CustomerName}-${ApplicationName}-efs-client-security-group
+  EfsServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Sub ${VpcId}
+      GroupDescription: Server security group for EFS mount
+      GroupName: !Sub ${CustomerName}-${ApplicationName}-efs-server-security-group
+      SecurityGroupIngress:
+        - IpProtocol: 'tcp'
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId: !Ref EfsClientSecurityGroup
+  EfsFileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      Encrypted: !Ref EfsEncrypted
+      PerformanceMode: maxIO
+      FileSystemTags:
+        - Key: Name
+          Value: !Sub ${CustomerName}-${ApplicationName}-efs
+  EfsMountTarget1:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref EfsFileSystem
+      SubnetId: !Sub ${Subnet1}
+      SecurityGroups:
+        - !Ref EfsServerSecurityGroup
+    DependsOn: EfsFileSystem
+  EfsMountTarget2:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref EfsFileSystem
+      SubnetId: !Sub ${Subnet2}
+      SecurityGroups:
+        - !Ref EfsServerSecurityGroup
+    DependsOn: EfsFileSystem
+Outputs:
+  EfsId:
+    Description: Application shared EFS
+    Value: !Ref EfsFileSystem
+    Export:
+      Name: !Sub ${CustomerName}-${ApplicationName}-EfsId
+  EfsServerSecurityGroup:
+    Description: EFS server security group ID
+    Value: !Ref EfsServerSecurityGroup
+    Export:
+      Name: !Sub ${CustomerName}-${ApplicationName}-efs-server-security-group
+  EfsClientSecurityGroup:
+    Description: EFS client security group ID
+    Value: !Ref EfsClientSecurityGroup
+    Export:
+      Name: !Sub ${CustomerName}-${ApplicationName}-efs-client-security-group
+  EfsMountTarget1:
+    Description: EFS mount target ID 1
+    Value: !Ref EfsMountTarget1
+    Export:
+      Name: !Sub ${CustomerName}-${ApplicationName}-efs-mount-target-id-1
+  EfsMountTargetIp1:
+    Description: EFS mount target IP 1
+    Value: !GetAtt EfsMountTarget1.IpAddress
+  EfsMountTarget2:
+    Description: EFS mount target ID 2
+    Value: !Ref EfsMountTarget2
+    Export:
+      Name: !Sub ${CustomerName}-${ApplicationName}-efs-mount-target-id-2
+  EfsMountTargetIp2:
+    Description: EFS mount target IP 2
+    Value: !GetAtt EfsMountTarget2.IpAddress

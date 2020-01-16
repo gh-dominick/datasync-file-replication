@@ -1,0 +1,67 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Create Ingress rules for Security Groups - 1.0.0
+Parameters:
+  CidrIp:
+    Default: ''
+    Description: CidrIp for Client
+    Type: String
+  FromPort:
+    Default: '22'
+    Description: From Port
+    Type: String
+  GroupId:
+    Description: Security Group to add rule
+    Type: String
+  IpProtocol:
+    Default: tcp
+    Description: Protocol
+    Type: String
+  SourceSecurityGroupId:
+    Default: ''
+    Description: SourceSecurityGroupId
+    Type: String
+  ToPort:
+    Default: '22'
+    Description: To Port
+    Type: String
+Conditions:
+  UseCidrIp: !Not
+    - !Equals
+      - !Ref CidrIp
+      - ''
+  UseSourceSecurityGroupId: !Not
+    - !Equals
+      - !Ref SourceSecurityGroupId
+      - ''
+Resources:
+  SecurityGroupIngressCidr:
+    Condition: UseCidrIp
+    Properties:
+      CidrIp: !Ref CidrIp
+      FromPort: !Ref FromPort
+      GroupId: !Ref GroupId
+      IpProtocol: !Ref IpProtocol
+      ToPort: !Ref ToPort
+    Type: 'AWS::EC2::SecurityGroupIngress'
+  SecurityGroupIngressSecurityGroupId:
+    Condition: UseSourceSecurityGroupId
+    Properties:
+      FromPort: !Ref FromPort
+      GroupId: !Ref GroupId
+      IpProtocol: !Ref IpProtocol
+      SourceSecurityGroupId: !Ref SourceSecurityGroupId
+      ToPort: !Ref ToPort
+    Type: 'AWS::EC2::SecurityGroupIngress'
+Outputs:
+  SecurityGroupIngressCidr:
+    Condition: UseCidrIp
+    Description: Security group ingres rule for client
+    Export:
+      Name: !Sub '${AWS::StackName}-SecurityGroupIngressCidr'
+    Value: !Ref SecurityGroupIngressCidr
+  SecurityGroupIngressSecurityGroupId:
+    Condition: UseSourceSecurityGroupId
+    Description: Security group ingres rule for client
+    Export:
+      Name: !Sub '${AWS::StackName}-SecurityGroupIngressSecurityGroupId'
+    Value: !Ref SecurityGroupIngressSecurityGroupId

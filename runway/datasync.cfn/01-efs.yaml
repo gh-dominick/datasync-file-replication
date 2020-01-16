@@ -1,0 +1,49 @@
+sys_path: ./
+namespace: ${customer}-${environment}
+stacker_bucket: ${customer}-${environment}-${region}-stacker
+
+common_parameters: &common_parameters
+  CustomerName: ${customer}
+  EnvironmentName: ${environment}
+  VpcId: ${vpc_id}
+  Subnet1: ${subnet1}
+  Subnet2: ${subnet2}
+  SshKey: ${ssh_key_name}
+
+stacks:
+  datasync-efs-source:
+    template_path: templates/efs.yaml
+    variables:
+      << : *common_parameters
+      ApplicationName: datasync
+      CustomerName: ${customer}-source
+      EfsEncrypted: true
+  node-instance-source:
+    template_path: templates/ec2.yaml
+    variables:
+      << : *common_parameters
+      AmiId: ${ami_id}
+      CustomerName: ${customer}-source
+      SubnetId: ${subnet1}
+      DefaultSecurityGroup: ${all_server_security_group}
+      EfsClientSecurityGroup: ${output datasync-efs-source::EfsClientSecurityGroup}
+      EfsFilesystemId: ${output datasync-efs-source::EfsId}
+  datasync-efs-destination:
+    template_path: templates/efs.yaml
+    variables:
+      << : *common_parameters
+      ApplicationName: datasync
+      CustomerName: ${customer}-destination
+      EfsEncrypted: true
+      Subnet1: ${subnet3}
+      Subnet2: ${subnet4}
+  node-instance-destination:
+    template_path: templates/ec2.yaml
+    variables:
+      << : *common_parameters
+      AmiId: ${ami_id}
+      CustomerName: ${customer}-destination
+      SubnetId: ${subnet1}
+      DefaultSecurityGroup: ${all_server_security_group}
+      EfsClientSecurityGroup: ${output datasync-efs-destination::EfsClientSecurityGroup}
+      EfsFilesystemId: ${output datasync-efs-destination::EfsId}

@@ -1,0 +1,145 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: VPC Endpoint - 1.0.0
+Parameters:
+  ApplicationName:
+    Type: String
+    Description: The name of the application
+  CustomerName:
+    Type: String
+    Description: Environment to which this stack belongs
+  EnvironmentName:
+    Type: String
+    Description: Environment to which this stack belongs
+  EndpointService:
+    Type: String
+    Description: 'Name of endpoint service. Available services can be verified with this command: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-vpc-endpoint-services.html'
+    AllowedValues:
+      - appmesh-envoy-management
+      - appstream.api
+      - appstream.streaming
+      - athena
+      - awsconnector
+      - clouddirectory
+      - cloudformation
+      - cloudtrail
+      - codebuild
+      - codebuild-fips
+      - codecommit
+      - codecommit-fips
+      - codepipeline
+      - config
+      - datasync
+      - dynamodb
+      - ec2
+      - ec2messages
+      - ecr.api
+      - ecr.dkr
+      - ecs
+      - ecs-agent
+      - ecs-telemetry
+      - elastic-inference.runtime
+      - elasticfilesystem
+      - elasticfilesystem-fips
+      - elasticloadbalancing
+      - events
+      - execute-api
+      - git-codecommit
+      - git-codecommit-fips
+      - glue
+      - kinesis-firehose
+      - kinesis-streams
+      - kms
+      - logs
+      - monitoring
+      - perfgamma.kinesis
+      - qldb.session
+      - rekognition
+      - rekognition-fips
+      - s3
+      - sagemaker.api
+      - sagemaker.runtime
+      - sagemaker.runtime-fips
+      - secretsmanager
+      - servicecatalog
+      - sms
+      - sms-fips
+      - sns
+      - sqs
+      - ssm
+      - ssmmessages
+      - storagegateway
+      - sts
+      - transfer
+      - transfer.server
+  PrivateDnsEnabled:
+    Type: String
+    Description: Enable Private DNS for VPC Endpoint
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  RouteTableIds:
+    Type: CommaDelimitedList
+    Description: List of route table IDs associated with VPC Gateway Endpoint
+    Default: ''
+  SubnetIds:
+    Type: CommaDelimitedList
+    Description: List of subnet IDs associated with VPC Endpoints
+  SecurityGroupIds:
+    Type: 'List<AWS::EC2::SecurityGroup::Id>'
+    Description: List of security group IDs associated with VPC Interface Endpoint
+    Default: ''
+  VpcEndpointType:
+    Type: String
+    Description: VPC Endpoint type
+    Default: Interface
+    AllowedValues:
+      - Gateway
+      - Interface
+  VpcId:
+    Type: String
+    Description: VPC ID
+Conditions:
+  GatewayEndpoint: !Equals
+    - !Ref VpcEndpointType
+    - Gateway
+  InterfaceEndpoint: !Equals
+    - !Ref VpcEndpointType
+    - Interface
+Resources:
+  DataSyncVpcGatewayEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Condition: GatewayEndpoint
+    Properties:
+      PolicyDocument: ''
+      RouteTableIds: !Ref RouteTableIds
+      ServiceName: !Join
+        - .
+        - - com.amazonaws
+          - !Ref 'AWS::Region'
+          - !Ref EndpointService
+      VpcEndpointType: !Ref VpcEndpointType
+      VpcId: !Ref VpcId
+  DataSyncVpcInterfaceEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Condition: InterfaceEndpoint
+    Properties:
+      PrivateDnsEnabled: !Ref PrivateDnsEnabled
+      SecurityGroupIds: !Ref SecurityGroupIds
+      ServiceName: !Join
+        - .
+        - - com.amazonaws
+          - !Ref 'AWS::Region'
+          - !Ref EndpointService
+      SubnetIds: !Ref SubnetIds
+      VpcEndpointType: !Ref VpcEndpointType
+      VpcId: !Ref VpcId
+Outputs:
+  DataSyncVpcGatewayEndpointId:
+    Description: Gateway VPCE ID
+    Condition: GatewayEndpoint
+    Value: !Ref DataSyncVpcGatewayEndpoint
+  DataSyncVpcInterfaceEndpointId:
+    Description: Interface VPCE ID
+    Condition: InterfaceEndpoint
+    Value: !Ref DataSyncVpcInterfaceEndpoint
