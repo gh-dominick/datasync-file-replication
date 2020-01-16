@@ -9,6 +9,7 @@ When creating the task, you can configure the default options in which the sync 
 - Define how manage transferred file
 - More..
 
+#### Configuration Options
 ![Options](/docs/images/task-configuration.png)
 
 [Next: Task Scheduling](/docs/schedule.md)
