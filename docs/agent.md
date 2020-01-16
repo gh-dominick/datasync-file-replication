@@ -2,7 +2,7 @@
 
 ### DataSync Components -- Agent
 
-The agent acts a intermediary between the source and destination storage systems to read and write data.
+The agent acts an intermediary between the source and destination storage systems to read and write data.
 
 - Console login to the agent is not needed for basic functionality. However, you can use SSM Session Manager for troubleshooting purposes.
 
