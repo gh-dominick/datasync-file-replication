@@ -112,6 +112,7 @@ Resources:
 
               packages:
               - python34
+              - amazon-efs-utils
 
               runcmd:
               - curl -O https://bootstrap.pypa.io/get-pip.py
