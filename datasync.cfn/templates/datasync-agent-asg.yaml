@@ -30,10 +30,10 @@ Parameters:
       - m5.10xlarge
       - m5.2xlarge
       - m5.4xlarge
-  SyncTaskCronSchedule:
+  SyncTaskScheduleExpression:
     Type: String
-    Default: '05 * * * ? *'
-    Description: Task cron schedule (cron format in UTC - [minute hour day/of/month month day/of/week year]
+    Default: cron(05 * * * ? *)
+    Description:  Schedule expression (cron or rate)
   DestinationEfsIp:
     Description: Destination EFS filesystem IP.
     Type: String
@@ -233,7 +233,7 @@ Resources:
                   {
                       local sourceLocationArn=$1
                       local destinationLocationArn=$2
-                      aws datasync create-task --source-location-arn ${!sourceLocationArn} --destination-location-arn ${!destinationLocationArn} --schedule ScheduleExpression="cron(${SyncTaskCronSchedule})" --options VerifyMode=NONE,OverwriteMode=ALWAYS,Atime=BEST_EFFORT,Mtime=PRESERVE,PreserveDeletedFiles=REMOVE,PreserveDevices=PRESERVE,PosixPermissions=PRESERVE,TaskQueueing=ENABLED --name Stack:${AWS::StackName} --region ${AWS::Region} --tags Key=StackName,Value=${AWS::StackName} --output text
+                      aws datasync create-task --source-location-arn ${!sourceLocationArn} --destination-location-arn ${!destinationLocationArn} --schedule ScheduleExpression="${SyncTaskScheduleExpression}" --options VerifyMode=NONE,OverwriteMode=ALWAYS,Atime=BEST_EFFORT,Mtime=PRESERVE,PreserveDeletedFiles=REMOVE,PreserveDevices=PRESERVE,PosixPermissions=PRESERVE,TaskQueueing=ENABLED --name Stack:${AWS::StackName} --region ${AWS::Region} --tags Key=StackName,Value=${AWS::StackName} --output text
                   }
 
                   function startDataSyncTaskExecution

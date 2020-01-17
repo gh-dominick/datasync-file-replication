@@ -110,7 +110,7 @@ stacks:
       SourceLocationRegion: ${region}
       SourceEfsFilesystemId: ${output datasync-efs-source::EfsId}
       SourceSubnetId: ${subnet1}
-      SyncTaskCronSchedule: '05 * * * ? *'
+      SyncTaskScheduleExpression: cron(05 * * * ? *)
       VpcEndpoint: ${output datasync-vpc-endpoint::DataSyncVpcInterfaceEndpointId}
       VpcEndpointSecurityGroupId: ${output datasync-vpce-sg::SecurityGroup}
       VpcEndpointInterfaceId: ${output datasync-vpc-endpoint::DataSyncVpcInterfaceNetworkInterfaceId}
