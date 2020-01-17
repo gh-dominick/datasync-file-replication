@@ -164,6 +164,15 @@ Resources:
               - Effect: Allow
                 Action: elasticfilesystem:Describe*
                 Resource: '*'
+        - PolicyName: cfn-mod
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:Describe*
+                  - cloudformation:DeleteStack
+                Resource: '*'
   LaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
     Properties:
@@ -201,9 +210,15 @@ Resources:
               - content: |
                   #!/bin/bash
 
+                  function getVpcEndpointInterface
+                  {
+                      aws cloudformation describe-stacks --stack-name ${CustomerName}-${EnvironmentName}-datasync-vpc-endpoint --region ${AWS::Region} --query 'Stacks[0].Outputs[?OutputKey==`DataSyncVpcInterfaceNetworkInterfaceId`].OutputValue' --output text
+                  }
+
                   function getPrivateLinkIp
                   {
-                      aws ec2 describe-network-interfaces --network-interface-ids ${VpcEndpointInterfaceId} --region ${AWS::Region} --query 'NetworkInterfaces[0].[PrivateIpAddress]' --output text
+                      local vpcEndpointInterfaceId=$1
+                      aws ec2 describe-network-interfaces --network-interface-ids ${!vpcEndpointInterfaceId} --region ${AWS::Region} --query 'NetworkInterfaces[0].[PrivateIpAddress]' --output text
                   }
 
                   function getActivationKey
@@ -218,12 +233,12 @@ Resources:
                       aws datasync create-agent --activation-key ${!activationKey} --agent-name datasync-agent --vpc-endpoint-id ${VpcEndpoint} --subnet-arns arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet/${SourceSubnetId} --security-group-arns arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/${EfsClientSecurityGroup} --region ${AWS::Region} --tags Key=StackName,Value=${AWS::StackName} --output text
                   }
 
-                  function createSourceDataSyncLocationEfs
+                  function createSourceLocation
                   {
                       aws datasync create-location-efs --efs-filesystem-arn 'arn:aws:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:file-system/${SourceEfsFilesystemId}' --subdirectory ${SourceSubdirectory} --ec2-config SubnetArn='arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet/${SourceSubnetId}',SecurityGroupArns='arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/${EfsClientSecurityGroup},arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/${AgentSecurityGroup}' --region ${AWS::Region} --tags Key=StackName,Value=${AWS::StackName} --output text
                   }
 
-                  function createDataSyncLocationEfs
+                  function createDestinationLocation
                   {
                       local agentArns=$1
                       aws datasync create-location-nfs --server-hostname ${DestinationEfsIp} --subdirectory ${DestinationSubdirectory} --on-prem-config AgentArns=${!agentArns} --region ${AWS::Region} --tags Key=StackName,Value=${AWS::StackName} --output text
@@ -236,26 +251,7 @@ Resources:
                       aws datasync create-task --source-location-arn ${!sourceLocationArn} --destination-location-arn ${!destinationLocationArn} --schedule ScheduleExpression="${SyncTaskScheduleExpression}" --options VerifyMode=NONE,OverwriteMode=ALWAYS,Atime=BEST_EFFORT,Mtime=PRESERVE,PreserveDeletedFiles=REMOVE,PreserveDevices=PRESERVE,PosixPermissions=PRESERVE,TaskQueueing=ENABLED --name Stack:${AWS::StackName} --region ${AWS::Region} --tags Key=StackName,Value=${AWS::StackName} --output text
                   }
 
-                  function startDataSyncTaskExecution
-                  {
-                      local taskArn=$1
-                      aws datasync start-task-execution --task-arn ${!taskArn} --region ${AWS::Region} --output text
-                  }
                 path: /tmp/functions_datasync.sh
-                permissions: 0777
-
-              - content: |
-                  #!/bin/bash
-
-                  source /tmp/functions_datasync.sh
-                  echo -e "$(date -u +%FT%T.%3N)\tDataSync":" Execute\tRunning task execution function startDataSyncTaskExecution()" >> /tmp/datasync_task_execution.log 2>&1
-                  if [ "$?" != "0" ]
-                  then
-                      echo -e "$(date -u +%FT%T.%3N)\tDataSync: Error\t\tFailed to run task execution function" >> /tmp/datasync_task_execution.log 2>&1
-                      exit 1
-                  fi
-                  echo -e "$(date -u +%FT%T.%3N)\tDataSync: Success\tTask executed ${!executionId}" >> /tmp/datasync_task_execution.log 2>&1
-                path: /tmp/start_datasync_task_execution.sh
                 permissions: 0777
 
               - content: |
@@ -266,12 +262,22 @@ Resources:
                   # start create delete datasync resources script
                   echo -e "aws cloudformation delete-stack --stack-name ${AWS::StackName} --region ${AWS::Region}" >> /tmp/delete_datasync_resources.sh
 
-                  # get private_link IP
-                  echo -e "$(date -u +%FT%T.%3N)\tDataSync: Retrieving VPC Endpoint PrivateLink IP on interface ${VpcEndpointInterfaceId}" >> /tmp/datasync_setup.log 2>&1
-                  privateLinkIp=$(getPrivateLinkIp)
+                  # get VPC endpoint interface ID
+                  echo -e "$(date -u +%FT%T.%3N)\tDataSync: Retrieving VPCE interface from CFN output" >> /tmp/datasync_setup.log 2>&1
+                  vpcEndpointInterfaceId=$(getVpcEndpointInterface)
                   if [ "$?" != "0" ]
                   then
-                     echo -e "$(date -u +%FT%T.%3N)\tDataSync: Error\t\tFailed to retrieve IP on ${!agentIp}" >> /tmp/datasync_setup.log 2>&1
+                     echo -e "$(date -u +%FT%T.%3N)\tDataSync: Error\t\tFailed to get interface ID" >> /tmp/datasync_setup.log 2>&1
+                     exit 1
+                  fi
+                  echo -e "$(date -u +%FT%T.%3N)\tDataSync: Success\tInterface ID found: ${!vpcEndpointInterfaceId}" >> /tmp/datasync_setup.log 2>&1
+
+                  # get private_link IP
+                  echo -e "$(date -u +%FT%T.%3N)\tDataSync: Retrieving VPCE PrivateLink IP on ${VpcEndpointInterfaceId}" >> /tmp/datasync_setup.log 2>&1
+                  privateLinkIp=$(getPrivateLinkIp ${!vpcEndpointInterfaceId})
+                  if [ "$?" != "0" ]
+                  then
+                     echo -e "$(date -u +%FT%T.%3N)\tDataSync: Error\t\tFailed to get IP on ${!agentIp}" >> /tmp/datasync_setup.log 2>&1
                      exit 1
                   fi
                   echo -e "$(date -u +%FT%T.%3N)\tDataSync: Success\tIP found: ${!privateLinkIp}" >> /tmp/datasync_setup.log 2>&1
@@ -302,9 +308,10 @@ Resources:
 
                   # start create delete datasync resources script
                   echo -e "aws cloudformation delete-stack --stack-name ${AWS::StackName} --region ${AWS::Region}" >> /tmp/delete_datasync_resources.sh
-                  # create source location (efs)
+
+                  # create source location
                   echo -e "$(date -u +%FT%T.%3N)\tDataSync: Execute\tCreating source location(efs) for ${SourceEfsFilesystemId}" >> /tmp/datasync_setup.log 2>&1
-                  sourceLocationArn=$(createSourceDataSyncLocationEfs)
+                  sourceLocationArn=$(createSourceLocation)
                   if [ "$?" != "0" ]
                   then
                       echo -e "$(date -u +%FT%T.%3N)\tDataSync: Error\t\tFailed to create source location for ${SourceEfsFilesystemId}" >> /tmp/datasync_setup.log 2>&1
@@ -313,9 +320,9 @@ Resources:
                   echo -e "$(date -u +%FT%T.%3N)\tDataSync: Success\tSource location(efs) created: ${!sourceLocationArn}" >> /tmp/datasync_setup.log 2>&1
                   sed -i "1iaws datasync delete-location --location-arn ${!sourceLocationArn} --region ${AWS::Region}" /tmp/delete_datasync_resources.sh
 
-                  # create destination location (efs)
+                  # create destination location
                   echo -e "$(date -u +%FT%T.%3N)\tDataSync: Execute\tCreating destination location(efs) for ${DestinationEfsIp}" >> /tmp/datasync_setup.log 2>&1
-                  destinationLocationArn=$(createDataSyncLocationEfs ${!agentArns})
+                  destinationLocationArn=$(createDestinationLocation ${!agentArns})
                   if [ "$?" != "0" ]
                   then
                       echo -e "$(date -u +%FT%T.%3N)\tDataSync: Error\t\tFailed to create destination location for ${DestinationEfsIp}" >> /tmp/datasync_setup.log 2>&1
@@ -335,16 +342,6 @@ Resources:
                   echo -e "$(date -u +%FT%T.%3N)\tDataSync: Success\tTask created: ${!taskArn}" >> /tmp/datasync_setup.log 2>&1
                   sed -i "1iaws datasync delete-task --task-arn ${!taskArn} --region ${AWS::Region}" /tmp/delete_datasync_resources.sh
 
-                  # update datasync task execution script with task arn
-                  echo -e "$(date -u +%FT%T.%3N)\tDataSync: Execute\tUpdating /tmp/start_datasync_task_execution.sh with task arn" >> /tmp/datasync_setup.log 2>&1
-                  sed -i -e "5i executionId=\$\(startDataSyncTaskExecution ${!taskArn} ${AWS::Region}\)" /tmp/start_datasync_task_execution.sh
-                  if [ "$?" != "0" ]
-                  then
-                      echo -e "$(date -u +%FT%T.%3N)\tDataSync: Error\t\tFailed to update /tmp/start_datasync_task_execution.sh" >> /tmp/datasync_setup.log 2>&1
-                      exit 1
-                  fi
-                  echo -e "$(date -u +%FT%T.%3N)\tDataSync: Success\tDatasync task execution script /tmp/start_datasync_task_execution.sh updated with task arn" >> /tmp/datasync_setup.log 2>&1
-
                 path: /tmp/create_datasync_resources.sh
                 permissions: 0777
 
@@ -357,9 +354,7 @@ Resources:
               - export PATH=~/.local/bin:$PATH
               - pip3 install awscli --upgrade --user
               - source /tmp/functions_datasync.sh
-              - agentIp=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
               - sleep 60
-              - echo /tmp/create_datasync_resources.sh
               - echo -e "$(date -u +%FT%T.%3N)\tDataSync":" Execute\tCreating datasync resources" >> /tmp/datasync_setup.log 2>&1
               - /tmp/create_datasync_resources.sh
               - if [ "$?" != "0" ]; then echo -e "$(date -u +%FT%T.%3N)\tDataSync":" Error\t\tFailed to create datasync resources" >> /tmp/datasync_setup.log 2>&1; else echo -e "$(date -u +%FT%T.%3N)\tDataSync":" Success\tCreated datasync resources" >> /tmp/datasync_setup.log 2>&1; fi
@@ -369,11 +364,6 @@ Outputs:
     Value:
       !Sub |
         commandId=$(aws ssm send-command --max-concurrency 1 --max-errors 0 --targets Key=tag:aws:ec2:fleet-id,Values=${AgentFleet} --document-name "AWS-RunShellScript" --parameters commands="sudo cat /tmp/datasync_setup.log" --query 'Command.CommandId' --output text --region ${AWS::Region}); instanceId=$(aws ec2 describe-fleet-instances --fleet-id ${AgentFleet} --query 'ActiveInstances[0].InstanceId' --output text --region ${AWS::Region}); aws ssm get-command-invocation --command-id ${!commandId} --instance-id ${!instanceId} --query 'StandardOutputContent' --output text --region ${AWS::Region}
-  ViewDataSyncTaskExecutionLog:
-    Description: SSM command to view DataSync task execution log
-    Value:
-      !Sub |
-        commandId=$(aws ssm send-command --max-concurrency 1 --max-errors 0 --targets Key=tag:aws:ec2:fleet-id,Values=${AgentFleet} --document-name "AWS-RunShellScript" --parameters commands="sudo cat /tmp/datasync_task_execution.log" --query 'Command.CommandId' --output text --region ${AWS::Region}); instanceId=$(aws ec2 describe-fleet-instances --fleet-id ${AgentFleet} --query 'ActiveInstances[0].InstanceId' --output text --region ${AWS::Region}); aws ssm get-command-invocation --command-id ${!commandId} --instance-id ${!instanceId} --query 'StandardOutputContent' --output text --region ${AWS::Region}
   ViewDeleteDataSyncResourcesScript:
     Description: SSM command to view delete DataSync resources script
     Value:
