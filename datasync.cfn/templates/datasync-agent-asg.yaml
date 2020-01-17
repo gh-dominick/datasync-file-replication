@@ -74,10 +74,9 @@ Parameters:
     Type: String
     Description: VPC Endpoint Security Group ID
     Default: ''
-  PrivateLinkEndpointIp:
+  VpcEndpointInterfaceId:
     Type: String
-    Description: VPC Endpoint private link IP address
-    Default: ''
+    Description: VPC Endpoint network interface ID
 Mappings:
   AmiRegion:
     ap-northeast-1:
@@ -202,9 +201,15 @@ Resources:
               - content: |
                   #!/bin/bash
 
+                  function getPrivateLinkIp
+                  {
+                      aws ec2 describe-network-interfaces --network-interface-ids ${VpcEndpointInterfaceId} --region ${AWS::Region} --query 'NetworkInterfaces[0].[PrivateIpAddress]' --output text
+                  }
+
                   function getActivationKey
                   {
-                      curl --silent "localhost:8080/?activationRegion=${AWS::Region}&gatewayType=SYNC&endpointType=PRIVATE_LINK&privateLinkEndpoint=${PrivateLinkEndpointIp}&no_redirect"
+                      local privateLinkIp=$1
+                      curl --silent "localhost:8080/?activationRegion=${AWS::Region}&gatewayType=SYNC&endpointType=PRIVATE_LINK&privateLinkEndpoint=${!privateLinkIp}&no_redirect"
                   }
 
                   function createAgent
@@ -261,9 +266,19 @@ Resources:
                   # start create delete datasync resources script
                   echo -e "aws cloudformation delete-stack --stack-name ${AWS::StackName} --region ${AWS::Region}" >> /tmp/delete_datasync_resources.sh
 
+                  # get private_link IP
+                  echo -e "$(date -u +%FT%T.%3N)\tDataSync: Retrieving VPC Endpoint PrivateLink IP on interface ${VpcEndpointInterfaceId}" >> /tmp/datasync_setup.log 2>&1
+                  privateLinkIp=$(getPrivateLinkIp)
+                  if [ "$?" != "0" ]
+                  then
+                     echo -e "$(date -u +%FT%T.%3N)\tDataSync: Error\t\tFailed to retrieve IP on ${!agentIp}" >> /tmp/datasync_setup.log 2>&1
+                     exit 1
+                  fi
+                  echo -e "$(date -u +%FT%T.%3N)\tDataSync: Success\tIP found: ${!privateLinkIp}" >> /tmp/datasync_setup.log 2>&1
+
                   # get activation key
                   echo -e "$(date -u +%FT%T.%3N)\tDataSync: Execute\tSelf-activating and generating activation key on agent on ${!agentIp}" >> /tmp/datasync_setup.log 2>&1
-                  activationKey=$(getActivationKey)
+                  activationKey=$(getActivationKey ${!privateLinkIp})
                   if [ "$?" != "0" ]
                   then
                      echo -e "$(date -u +%FT%T.%3N)\tDataSync: Error\t\tFailed to self-activate or generate activation key on ${!agentIp}" >> /tmp/datasync_setup.log 2>&1

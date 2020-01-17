@@ -11,6 +11,42 @@ common_parameters: &common_parameters
   SshKey: ${ssh_key_name}
 
 stacks:
+  datasync-efs-source:
+    template_path: templates/efs.yaml
+    variables:
+      << : *common_parameters
+      ApplicationName: datasync
+      CustomerName: ${customer}-source
+      EfsEncrypted: true
+  node-instance-source:
+    template_path: templates/ec2.yaml
+    variables:
+      << : *common_parameters
+      AmiId: ${ami_id}
+      CustomerName: ${customer}-source
+      SubnetId: ${subnet1}
+      DefaultSecurityGroup: ${all_server_security_group}
+      EfsClientSecurityGroup: ${output datasync-efs-source::EfsClientSecurityGroup}
+      EfsFilesystemId: ${output datasync-efs-source::EfsId}
+  datasync-efs-destination:
+    template_path: templates/efs.yaml
+    variables:
+      << : *common_parameters
+      ApplicationName: datasync
+      CustomerName: ${customer}-destination
+      EfsEncrypted: true
+      Subnet1: ${subnet3}
+      Subnet2: ${subnet4}
+  node-instance-destination:
+    template_path: templates/ec2.yaml
+    variables:
+      << : *common_parameters
+      AmiId: ${ami_id}
+      CustomerName: ${customer}-destination
+      SubnetId: ${subnet1}
+      DefaultSecurityGroup: ${all_server_security_group}
+      EfsClientSecurityGroup: ${output datasync-efs-destination::EfsClientSecurityGroup}
+      EfsFilesystemId: ${output datasync-efs-destination::EfsId}
   datasync-agent-sg:
     template_path: templates/security-group.yaml
     variables:
@@ -30,7 +66,7 @@ stacks:
       FromPort: 2049
       ToPort: 2049
       IpProtocol: tcp
-      GroupId: ${rxref datasync-efs-destination::EfsServerSecurityGroup}
+      GroupId: ${output datasync-efs-destination::EfsServerSecurityGroup}
       SourceSecurityGroupId: ${output datasync-agent-sg::SecurityGroup}
   datasync-vpce-sg:
     template_path: templates/security-group.yaml
@@ -59,7 +95,7 @@ stacks:
       << : *common_parameters
       ApplicationName: datasync
       EndpointService: datasync
-      SubnetIds: ${subnet1},${subnet2}
+      SubnetIds: ${subnet1}
       SecurityGroupIds: ${output datasync-vpce-sg::SecurityGroup}
       VpcEndpointType: Interface
   datasync-agent:
@@ -69,12 +105,12 @@ stacks:
       ApplicationName: datasync-agent
       AgentSecurityGroup: ${output datasync-agent-sg::SecurityGroup}
       AllServerSecurityGroup: ${all_server_security_group}
-      EfsClientSecurityGroup: ${rxref datasync-efs-source::EfsClientSecurityGroup}
-      DestinationEfsIp: ${rxref datasync-efs-destination::EfsMountTargetIp1}
+      EfsClientSecurityGroup: ${output datasync-efs-source::EfsClientSecurityGroup}
+      DestinationEfsIp: ${output datasync-efs-destination::EfsMountTargetIp1}
       SourceLocationRegion: ${region}
-      SourceEfsFilesystemId: ${rxref datasync-efs-source::EfsId}
+      SourceEfsFilesystemId: ${output datasync-efs-source::EfsId}
       SourceSubnetId: ${subnet1}
       SyncTaskCronSchedule: '05 * * * ? *'
       VpcEndpoint: ${output datasync-vpc-endpoint::DataSyncVpcInterfaceEndpointId}
       VpcEndpointSecurityGroupId: ${output datasync-vpce-sg::SecurityGroup}
-      PrivateLinkEndpointIp: ${private_link_endpoint_ip}
+      VpcEndpointInterfaceId: ${output datasync-vpc-endpoint::DataSyncVpcInterfaceNetworkInterfaceId}

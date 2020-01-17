@@ -143,3 +143,12 @@ Outputs:
     Description: Interface VPCE ID
     Condition: InterfaceEndpoint
     Value: !Ref DataSyncVpcInterfaceEndpoint
+  DataSyncVpcInterfaceNetworkInterfaceId:
+    Description: Interface VPCE network interface ID
+    Condition: InterfaceEndpoint
+    Value:
+      !Join
+      - ','
+      - !GetAtt
+        - DataSyncVpcInterfaceEndpoint
+        - NetworkInterfaceIds
